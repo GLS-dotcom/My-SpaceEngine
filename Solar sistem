@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sistema Solar - Proporções Reais</title>
+    <style>
+        body { margin:0; overflow:hidden; background:#000; }
+        #info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            color: rgba(255,255,255,0.6);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            pointer-events: none;
+            z-index: 10;
+        }
+        #loader {
+            position: fixed;
+            top:0; left:0; width:100%; height:100%;
+            display:flex; flex-direction:column; justify-content:center; align-items:center;
+            background:#000; color:white; font-family:Arial,sans-serif; font-size:1.2rem;
+            z-index:100; transition: opacity 1s;
+        }
+        #loader .spinner {
+            border:4px solid #333; border-top:4px solid #ffaa44;
+            border-radius:50%; width:40px; height:40px;
+            animation: spin 1s linear infinite; margin-bottom:20px;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        #loader.hidden { opacity:0; pointer-events:none; }
+    </style>
+</head>
+<body>
+    <div id="loader"><div class="spinner"></div><span>Carregando Sistema Solar...</span></div>
+    <div id="info">Clique e arraste | Scroll para zoom</div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+        import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+        import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x050510);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 20, 45);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.2;
+        document.body.prepend(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 0.15;
+        controls.minDistance = 5;
+        controls.maxDistance = 120;
+        controls.target.set(0,0,0);
+
+        const composer = new EffectComposer(renderer);
+        composer.addPass(new RenderPass(scene, camera));
+        const bloomPass = new UnrealBloomPass(
+            new THREE.Vector2(window.innerWidth, window.innerHeight), 0.4, 0.2, 0.1
+        );
+        composer.addPass(bloomPass);
+
+        const ambientLight = new THREE.AmbientLight(0x222244, 0.3);
+        scene.add(ambientLight);
+        const sunLight = new THREE.PointLight(0xffeedd, 4, 0, 0);
+        sunLight.position.set(0,0,0);
+        scene.add(sunLight);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(5,10,7);
+        scene.add(dirLight);
+
+        const textureLoader = new THREE.TextureLoader();
+
+        function loadTexture(url) {
+            return new Promise((resolve) => {
+                textureLoader.load(url, resolve, undefined, () => resolve(null));
+            });
+        }
+
+        async function createPlanet(name, radius, distance, speed, textureUrl, tilt = 0) {
+            const geometry = new THREE.SphereGeometry(radius, 64, 64);
+            const material = new THREE.MeshStandardMaterial({ roughness:0.6, metalness:0.1 });
+            const texture = await loadTexture(textureUrl);
+            if (texture) { material.map = texture; material.needsUpdate = true; }
+            else { material.color.setHex(0x888888); console.warn(`Textura não carregada para ${name}`); }
+            const planet = new THREE.Mesh(geometry, material);
+            planet.rotation.z = tilt;
+
+            const orbitGroup = new THREE.Group();
+            orbitGroup.add(planet);
+            planet.position.x = distance;
+
+            // órbita
+            const pts = [];
+            for (let i=0; i<=128; i++) {
+                const a = (i/128)*Math.PI*2;
+                pts.push(new THREE.Vector3(Math.cos(a)*distance, 0, Math.sin(a)*distance));
+            }
+            const orbitGeo = new THREE.BufferGeometry().setFromPoints(pts);
+            const orbitMat = new THREE.LineBasicMaterial({ color:0x446688, transparent:true, opacity:0.15 });
+            const orbitLine = new THREE.Line(orbitGeo, orbitMat);
+            scene.add(orbitLine);
+
+            orbitGroup.userData = { speed, planet };
+            return orbitGroup;
+        }
+
+        async function createSun(radius) {
+            const geometry = new THREE.SphereGeometry(radius, 64, 64);
+            const material = new THREE.MeshStandardMaterial({
+                roughness:0.2, metalness:0,
+                emissive: new THREE.Color(0xff8800), emissiveIntensity:1.8
+            });
+            const texture = await loadTexture('https://threejs.org/examples/textures/planets/sun.jpg');
+            if (texture) { material.map = texture; material.needsUpdate = true; }
+            const sun = new THREE.Mesh(geometry, material);
+            scene.add(sun);
+            return sun;
+        }
+
+        function createSaturnRings(planetRadius) {
+            const inner = planetRadius * 1.4, outer = planetRadius * 2.6;
+            const geometry = new THREE.RingGeometry(inner, outer, 256);
+            geometry.deleteAttribute('uv');
+            geometry.computeVertexNormals();
+
+            const canvas = document.createElement('canvas');
+            canvas.width = 1024; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0,0,canvas.width,canvas.height);
+            for (let i=0; i<canvas.width; i++) {
+                const t = i/canvas.width;
+                let alpha = 0;
+                if (t>0.1 && t<0.4) alpha = 0.7 + 0.3*Math.sin(t*30);
+                else if (t>0.5 && t<0.85) alpha = 0.6 + 0.3*Math.sin(t*25+1.2);
+                else if (t>0.4 && t<0.5) alpha = 0.1 + 0.1*Math.sin(t*40);
+                else if (t>0.05 && t<0.1) alpha = 0.3 + 0.2*Math.sin(t*50);
+                else if (t<0.05) alpha = 0.1;
+                else if (t>0.85 && t<0.92) alpha = 0.3 + 0.2*Math.sin(t*60);
+                else alpha = 0;
+                const r = 180 + 70*(t-0.5);
+                const g = 160 + 60*(t-0.5);
+                const b = 140 + 50*(t-0.5);
+                ctx.fillStyle = `rgba(${r|0}, ${g|0}, ${b|0}, ${alpha})`;
+                ctx.fillRect(i,0,1,canvas.height);
+            }
+            const texture = new THREE.CanvasTexture(canvas);
+            const material = new THREE.MeshStandardMaterial({
+                map:texture, side:THREE.DoubleSide, transparent:true,
+                opacity:0.9, roughness:0.8, metalness:0, depthWrite:false
+            });
+            const ring = new THREE.Mesh(geometry, material);
+            ring.rotation.x = Math.PI/2.25;
+            ring.rotation.z = 0.1;
+            return ring;
+        }
+
+        async function createMoon(earthRadius) {
+            const moonRadius = earthRadius / 4.0;
+            const geometry = new THREE.SphereGeometry(moonRadius, 24, 24);
+            const material = new THREE.MeshStandardMaterial({ roughness:0.9, metalness:0 });
+            const texture = await loadTexture('https://threejs.org/examples/textures/planets/moon_1024.jpg');
+            if (texture) { material.map = texture; material.needsUpdate = true; }
+            else { material.color.setHex(0xcccccc); }
+            const moon = new THREE.Mesh(geometry, material);
+            moon.position.x = 1.1;
+            return moon;
+        }
+
+        // --- Proporções reais com escala extra para visibilidade ---
+        const SOL_RADIUS = 2.8;
+        const SCALE = 5;
+
+        const planetData = [
+            { name:'Mercúrio', radius:(SOL_RADIUS/285.1)*SCALE, distance:3.5, speed:0.035, texture:'https://www.solarsystemscope.com/textures/download/2k_mercury.jpg', tilt:0.03 },
+            { name:'Vênus',   radius:(SOL_RADIUS/114.5)*SCALE, distance:5.5, speed:0.025, texture:'https://www.solarsystemscope.com/textures/download/2k_venus_atmosphere.jpg', tilt:177.4*Math.PI/180 },
+            { name:'Terra',   radius:(SOL_RADIUS/109.1)*SCALE, distance:7.5, speed:0.02,  texture:'https://www.solarsystemscope.com/textures/download/2k_earth_daymap.jpg', tilt:0.41 },
+            { name:'Marte',   radius:(SOL_RADIUS/204.9)*SCALE, distance:9.5, speed:0.016, texture:'https://www.solarsystemscope.com/textures/download/2k_mars.jpg', tilt:0.44 },
+            { name:'Júpiter', radius:(SOL_RADIUS/9.96)*SCALE,  distance:15.0, speed:0.009, texture:'https://www.solarsystemscope.com/textures/download/2k_jupiter.jpg', tilt:0.05 },
+            { name:'Saturno', radius:(SOL_RADIUS/11.96)*SCALE, distance:17.5, speed:0.007, texture:'https://www.solarsystemscope.com/textures/download/2k_saturn.jpg', tilt:0.47 },
+            { name:'Urano',   radius:(SOL_RADIUS/27.4)*SCALE,  distance:22.0, speed:0.005, texture:'https://www.solarsystemscope.com/textures/download/2k_uranus.jpg', tilt:1.71 },
+            { name:'Netuno',  radius:(SOL_RADIUS/28.2)*SCALE,  distance:26.0, speed:0.004, texture:'https://www.solarsystemscope.com/textures/download/2k_neptune.jpg', tilt:0.49 },
+        ];
+
+        const planetGroups = [];
+
+        const sun = await createSun(SOL_RADIUS);
+
+        for (const data of planetData) {
+            const group = await createPlanet(data.name, data.radius, data.distance, data.speed, data.texture, data.tilt);
+            scene.add(group);
+            planetGroups.push(group);
+
+            if (data.name === 'Saturno') {
+                const saturnMesh = group.userData.planet;
+                saturnMesh.add(createSaturnRings(data.radius));
+            }
+            if (data.name === 'Terra') {
+                const earthMesh = group.userData.planet;
+                const moonGroup = new THREE.Group();
+                moonGroup.add(await createMoon(data.radius));
+                earthMesh.add(moonGroup);
+                moonGroup.userData = { speed:0.04 };
+            }
+        }
+
+        // --- Estrelas ---
+        function createStars() {
+            const count = 10000;
+            const pos = new Float32Array(count*3);
+            const col = new Float32Array(count*3);
+            const sizes = new Float32Array(count);
+            for (let i=0; i<count; i++) {
+                const r = 120 + Math.random()*350;
+                const theta = Math.random()*Math.PI*2;
+                const phi = Math.acos(2*Math.random()-1);
+                pos[i*3] = r*Math.sin(phi)*Math.cos(theta);
+                pos[i*3+1] = r*Math.sin(phi)*Math.sin(theta);
+                pos[i*3+2] = r*Math.cos(phi);
+                const t = Math.random();
+                if (t<0.3) {
+                    col[i*3]=0.7+Math.random()*0.3; col[i*3+1]=0.7+Math.random()*0.3; col[i*3+2]=1.0;
+                    sizes[i]=0.2+Math.random()*0.4;
+                } else if (t<0.7) {
+                    col[i*3]=1.0; col[i*3+1]=0.8+Math.random()*0.2; col[i*3+2]=0.5+Math.random()*0.3;
+                    sizes[i]=0.3+Math.random()*0.5;
+                } else {
+                    col[i*3]=1.0; col[i*3+1]=0.4+Math.random()*0.3; col[i*3+2]=0.2+Math.random()*0.2;
+                    sizes[i]=0.15+Math.random()*0.3;
+                }
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+            geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+            geo.setAttribute('size', new THREE.BufferAttribute(sizes,1));
+            const mat = new THREE.PointsMaterial({
+                size:0.35, vertexColors:true, transparent:true, opacity:0.9,
+                blending:THREE.AdditiveBlending, sizeAttenuation:true
+            });
+            scene.add(new THREE.Points(geo, mat));
+        }
+        createStars();
+
+        // --- Cinturão de asteroides (agora em 10.0 a 11.5, longe de Júpiter) ---
+        function createAsteroidBelt() {
+            const count = 5000;
+            const pos = new Float32Array(count*3);
+            const col = new Float32Array(count*3);
+            for (let i=0; i<count; i++) {
+                const r = 10.0 + Math.random() * 1.5; // 10.0 – 11.5
+                const angle = Math.random() * Math.PI * 2;
+                const y = (Math.random()-0.5) * 0.8;
+                pos[i*3] = Math.cos(angle)*r;
+                pos[i*3+1] = y;
+                pos[i*3+2] = Math.sin(angle)*r;
+                const c = 0.5 + Math.random()*0.5;
+                col[i*3] = 0.8*c; col[i*3+1] = 0.7*c; col[i*3+2] = 0.5*c;
+            }
+            const geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+            geo.setAttribute('color', new THREE.BufferAttribute(col,3));
+            const mat = new THREE.PointsMaterial({
+                size:0.06, vertexColors:true, transparent:true, opacity:0.6,
+                blending:THREE.AdditiveBlending
+            });
+            const belt = new THREE.Points(geo, mat);
+            scene.add(belt);
+            return belt;
+        }
+        const asteroidBelt = createAsteroidBelt();
+
+        // --- Animação ---
+        function animate() {
+            requestAnimationFrame(animate);
+            sun.rotation.y += 0.0008;
+            planetGroups.forEach(g => g.rotation.y += g.userData.speed);
+            const earthGroup = planetGroups[2];
+            if (earthGroup) {
+                const earthMesh = earthGroup.userData.planet;
+                const moonGroup = earthMesh.children.find(c => c.type === 'Group');
+                if (moonGroup) moonGroup.rotation.y += 0.045;
+            }
+            if (asteroidBelt) asteroidBelt.rotation.y += 0.0006;
+            controls.update();
+            composer.render();
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            const w = window.innerWidth, h = window.innerHeight;
+            camera.aspect = w/h; camera.updateProjectionMatrix();
+            renderer.setSize(w,h); composer.setSize(w,h);
+        });
+
+        document.getElementById('loader').classList.add('hidden');
+        setTimeout(() => document.getElementById('loader').style.display = 'none', 2000);
+        console.log('🚀 Sistema Solar com proporções reais, Júpiter agora bem separado dos asteroides.');
+    </script>
+</body>
+</html>
