@@ -1,0 +1,32 @@
+CosmosEngine/
+
+CMakeLists.txt
+
+README.md
+
+src/
+    main.cpp
+
+engine/
+    Core/
+        Application.hpp
+        Application.cpp
+
+        Logger.hpp
+        Logger.cpp
+
+        Timer.hpp
+        Timer.cpp
+
+        UUID.hpp
+        UUID.cpp
+
+        Version.hpp
+
+include/
+
+assets/
+
+docs/
+
+tests/
