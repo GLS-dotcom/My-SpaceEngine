@@ -1,0 +1,5 @@
+#pragma once
+
+#define COSMOS_VERSION_MAJOR 0
+#define COSMOS_VERSION_MINOR 0
+#define COSMOS_VERSION_PATCH 1
